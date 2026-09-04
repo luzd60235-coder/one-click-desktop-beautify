@@ -42,16 +42,37 @@ public static class OneClickInstance {
   }
 }
 '@
-if (-not [OneClickInstance]::Acquire()) {
+$appRoot = Split-Path -Parent $PSCommandPath
+$localDataRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'OneClickBeautify'
+$instanceMarkerCandidates = @(
+    (Join-Path $localDataRoot 'instance.pid'),
+    (Join-Path $appRoot 'instance.pid')
+)
+$instanceLockAcquired = [OneClickInstance]::Acquire()
+if (-not $instanceLockAcquired) {
     if ([OneClickInstance]::ActivateExisting()) {
         [Environment]::Exit(0)
     }
-    # A stale/legacy process may hold the mutex without exposing a window.
-    # Continue in recovery mode so the user can regain the interface; any
-    # occupied hotkeys will be reported by the normal registration feedback.
+    # Recover only a process previously identified as this app. This handles
+    # legacy instances that hold the mutex without exposing a window.
+    foreach ($markerPath in $instanceMarkerCandidates) {
+        if (-not (Test-Path -LiteralPath $markerPath)) { continue }
+        try {
+            $marker = [IO.File]::ReadAllText($markerPath).Trim().Split('|')
+            $oldPid = 0
+            $oldStartTicks = 0L
+            if ($marker.Count -ge 2 -and [int]::TryParse($marker[0], [ref]$oldPid) -and [long]::TryParse($marker[1], [ref]$oldStartTicks)) {
+                $oldProcess = Get-Process -Id $oldPid -ErrorAction SilentlyContinue
+                if ($oldProcess -and $oldProcess.ProcessName -eq 'powershell' -and $oldProcess.StartTime.Ticks -eq $oldStartTicks) {
+                    Stop-Process -Id $oldPid -Force -ErrorAction SilentlyContinue
+                }
+            }
+        } catch { }
+    }
+    Start-Sleep -Milliseconds 250
+    $instanceLockAcquired = [OneClickInstance]::Acquire()
 }
 
-$appRoot = Split-Path -Parent $PSCommandPath
 $dataRoot = Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'OneClickBeautify'
 $probePath = Join-Path $dataRoot ([IO.Path]::GetRandomFileName())
 try {
@@ -64,6 +85,18 @@ try {
 }
 $configPath = Join-Path $dataRoot 'shortcuts.json'
 $legacyConfigPath = Join-Path $appRoot 'shortcut-config.json'
+$instanceMarkerPath = Join-Path $appRoot 'instance.pid'
+try {
+    $currentProcess = Get-Process -Id $PID
+    [IO.File]::WriteAllText($instanceMarkerPath, "$PID|$($currentProcess.StartTime.Ticks)", [Text.UTF8Encoding]::new($false))
+} catch {
+    $instanceMarkerPath = Join-Path $dataRoot 'instance.pid'
+    try {
+        [IO.Directory]::CreateDirectory($dataRoot) | Out-Null
+        $currentProcess = Get-Process -Id $PID
+        [IO.File]::WriteAllText($instanceMarkerPath, "$PID|$($currentProcess.StartTime.Ticks)", [Text.UTF8Encoding]::new($false))
+    } catch { }
+}
 
 $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="一键桌面美化" Width="1080" Height="720" MinWidth="900" MinHeight="600" WindowStartupLocation="CenterScreen" Background="#F3F5F8" FontFamily="Segoe UI">
@@ -1018,6 +1051,11 @@ $window.Add_Closed({
         $script:trayIcon.Dispose()
         $script:trayIcon = $null
     }
+    try {
+        if ((Test-Path -LiteralPath $instanceMarkerPath) -and ([IO.File]::ReadAllText($instanceMarkerPath).Trim() -like "$PID|*")) {
+            Remove-Item -LiteralPath $instanceMarkerPath -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
 })
 
 Refresh-ShortcutList
