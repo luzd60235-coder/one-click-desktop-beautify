@@ -43,10 +43,12 @@ public static class OneClickInstance {
 }
 '@
 if (-not [OneClickInstance]::Acquire()) {
-    if (-not [OneClickInstance]::ActivateExisting()) {
-        [System.Windows.Forms.MessageBox]::Show('一键桌面美化已经在后台运行，但找不到窗口。请在任务管理器中结束旧实例后重试。', '一键桌面美化', 'OK', 'Warning') | Out-Null
+    if ([OneClickInstance]::ActivateExisting()) {
+        [Environment]::Exit(0)
     }
-    [Environment]::Exit(0)
+    # A stale/legacy process may hold the mutex without exposing a window.
+    # Continue in recovery mode so the user can regain the interface; any
+    # occupied hotkeys will be reported by the normal registration feedback.
 }
 
 $appRoot = Split-Path -Parent $PSCommandPath
