@@ -14,17 +14,21 @@ public static class OneClickInstance {
     mutex = new Mutex(true, "Local\\OneClickBeautify", out created);
     return created;
   }
-  public static void ActivateExisting() {
+  public static bool ActivateExisting() {
     IntPtr hwnd = FindWindow(null, "一键桌面美化");
     if (hwnd != IntPtr.Zero) {
       ShowWindow(hwnd, 9);
       SetForegroundWindow(hwnd);
+      return true;
     }
+    return false;
   }
 }
 '@
 if (-not [OneClickInstance]::Acquire()) {
-    [System.Windows.Forms.MessageBox]::Show('一键桌面美化已经在托盘运行，快捷键仍然有效。请从托盘图标打开它。', '一键桌面美化', 'OK', 'Information') | Out-Null
+    if (-not [OneClickInstance]::ActivateExisting()) {
+        [System.Windows.Forms.MessageBox]::Show('一键桌面美化已经在后台运行，但找不到窗口。请在任务管理器中结束旧实例后重试。', '一键桌面美化', 'OK', 'Warning') | Out-Null
+    }
     [Environment]::Exit(0)
 }
 
