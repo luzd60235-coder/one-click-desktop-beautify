@@ -422,8 +422,7 @@ $registeredIds = @{}
 $registeredHotkeySpecs = @{}
 $hotkeyIdBase = 1200
 $hwndSource = $null
-$activeProfileId = $null
-$launchedProcessNames = @{}
+$activeProfiles = @{}
 $script:allowClose = $false
 $script:trayIcon = $null
 
@@ -701,51 +700,77 @@ function Start-ProfileApps($profile) {
     }
 }
 
-function Exit-BeautyMode([string[]]$preserveProcessNames = @()) {
+function Update-DesktopPresentation {
+    $hideIcons = $false
+    $hideTaskbar = $false
+    foreach ($state in @($script:activeProfiles.Values)) {
+        if ([bool]$state.Profile.DesktopIcons) { $hideIcons = $true }
+        if ([bool]$state.Profile.Taskbar) { $hideTaskbar = $true }
+    }
+    $script:desktopIconsError = $null
+    Set-DesktopIconsVisible (-not $hideIcons)
+    Set-TaskbarVisible (-not $hideTaskbar)
+}
+
+function Stop-ProfileApps([string]$profileId, $state) {
+    # Do not close a process that is still selected by another active profile.
+    $sharedNames = @{}
+    foreach ($entry in $script:activeProfiles.GetEnumerator()) {
+        if ([string]$entry.Key -eq $profileId) { continue }
+        foreach ($name in @($entry.Value.ProcessNames)) { $sharedNames[$name] = $true }
+    }
+    foreach ($name in @($state.ProcessNames)) {
+        if ($sharedNames.ContainsKey($name)) { continue }
+        # Some desktop utilities (including Clash Verge when elevated) do not
+        # accept a graceful stop from the unelevated launcher.  Force only the
+        # processes explicitly owned by this profile.
+        Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Exit-BeautyMode {
+    foreach ($entry in @($script:activeProfiles.GetEnumerator())) {
+        Stop-ProfileApps ([string]$entry.Key) $entry.Value
+    }
+    $script:activeProfiles.Clear()
+    $script:desktopIconsError = $null
     Set-DesktopIconsVisible $true
     Set-TaskbarVisible $true
-    foreach ($name in @($script:launchedProcessNames.Keys)) {
-        if ($preserveProcessNames -contains $name) { continue }
-        Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
-    }
-    $script:launchedProcessNames.Clear()
-    $script:activeProfileId = $null
 }
 
 function Invoke-Profile($profile) {
     try {
-        if ($activeProfileId -eq $profile.Id) {
-            Exit-BeautyMode
-            Set-Validation '已切回工作模式' 'ok'
+        $profileId = [string]$profile.Id
+        if ($script:activeProfiles.ContainsKey($profileId)) {
+            $state = $script:activeProfiles[$profileId]
+            Stop-ProfileApps $profileId $state
+            [void]$script:activeProfiles.Remove($profileId)
+            Update-DesktopPresentation
+            Set-Validation "已关闭 [$($profile.Name)]" 'ok'
+            return
+        }
+
+        # Profiles are independent: starting P must not close N (or any other
+        # profile). Only a second press of the same hotkey closes its apps.
+        $launchResult = Start-ProfileApps $profile
+        if ($launchResult.Failures.Count -gt 0) {
+            foreach ($name in @($launchResult.StartedProcessNames)) {
+                Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
+            }
+            $failureMessage = "未启用 [$($profile.Name)]：" + ($launchResult.Failures -join '；')
+            Set-Validation $failureMessage 'error'
+            Show-TrayStatus $failureMessage 'error'
+            return
+        }
+        $script:activeProfiles[$profileId] = [pscustomobject]@{
+            Profile = $profile
+            ProcessNames = @($launchResult.SelectedProcessNames)
+        }
+        Update-DesktopPresentation
+        if ($script:desktopIconsError) {
+            Set-Validation ("已启用 [$($profile.Name)]（桌面图标设置未生效，但软件已启动）") 'warn'
         } else {
-            # Start the requested profile first.  If its executable is broken
-            # (Clash Verge on some installations exits immediately), retain
-            # the current profile instead of leaving the user with everything
-            # from the old mode closed and nothing from the new mode open.
-            $launchResult = Start-ProfileApps $profile
-            if ($launchResult.Failures.Count -gt 0) {
-                foreach ($name in @($launchResult.StartedProcessNames)) {
-                    Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
-                }
-                $failureMessage = "未切换到 [$($profile.Name)]：" + ($launchResult.Failures -join '；')
-                Set-Validation $failureMessage 'error'
-                Show-TrayStatus $failureMessage 'error'
-                return
-            }
-            if ($activeProfileId) { Exit-BeautyMode $launchResult.SelectedProcessNames }
-            $script:desktopIconsError = $null
-            Set-DesktopIconsVisible (-not [bool]$profile.DesktopIcons)
-            Set-TaskbarVisible (-not [bool]$profile.Taskbar)
-            # Remember every selected application, including one that was
-            # already running before beauty mode was entered.  The second
-            # press must close the whole selected set.
-            foreach ($name in @($launchResult.SelectedProcessNames)) { $script:launchedProcessNames[$name] = $true }
-            $script:activeProfileId = $profile.Id
-            if ($script:desktopIconsError) {
-                Set-Validation ("已启用 [$($profile.Name)]（桌面图标设置未生效，但软件已启动）") 'warn'
-            } else {
-                Set-Validation "已启用 [$($profile.Name)]" 'ok'
-            }
+            Set-Validation "已启用 [$($profile.Name)]" 'ok'
         }
     } catch { Set-Validation ('执行失败：' + $_.Exception.Message) 'error' }
 }
@@ -956,7 +981,7 @@ $window.Add_Closing([System.ComponentModel.CancelEventHandler]{
     }
 })
 $window.Add_Closed({
-    if ($activeProfileId) { try { Exit-BeautyMode } catch { } }
+    if ($script:activeProfiles.Count -gt 0) { try { Exit-BeautyMode } catch { } }
     Unregister-AllHotkeys
     if ($script:trayIcon) {
         $script:trayIcon.Visible = $false
