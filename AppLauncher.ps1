@@ -460,7 +460,7 @@ function Show-MainWindow {
     $window.ShowInTaskbar = $true
     $window.WindowState = 'Normal'
     $window.Activate()
-    if ($script:trayIcon) { $script:trayIcon.Visible = $false }
+    if ($script:trayIcon) { $script:trayIcon.Visible = $true }
 }
 
 function Initialize-TrayIcon {
@@ -483,7 +483,9 @@ function Initialize-TrayIcon {
     })
     $tray.ContextMenuStrip = $menu
     $tray.Add_DoubleClick({ Show-MainWindow })
-    $tray.Visible = $false
+    # Keep a discoverable entry in the notification area while the hotkey
+    # listener is alive, including when the main window is open.
+    $tray.Visible = $true
     $script:trayIcon = $tray
 }
 
