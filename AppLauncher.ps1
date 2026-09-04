@@ -260,6 +260,7 @@ function Find-TranslucentTBPath {
     # available when the user has installed it separately, while still
     # supporting an older unpacked folder that contains the portable build.
     $candidates = @(
+        'D:\TranslucentTB-portable-x64\TranslucentTB.exe',
         (Join-Path $appRoot 'TranslucentTB-portable-x64\TranslucentTB.exe'),
         (Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\TranslucentTB.exe'),
         (Join-Path $env:LOCALAPPDATA 'Programs\TranslucentTB\TranslucentTB.exe'),
@@ -709,11 +710,13 @@ function Set-DesktopIconsVisible([bool]$visible) {
 }
 
 function Set-TaskbarVisible([bool]$visible) {
-    $taskbar = [TaskbarApi]::FindWindow('Shell_TrayWnd', $null)
-    if ($taskbar -ne [IntPtr]::Zero) {
-        $showCommand = 0
-        if ($visible) { $showCommand = 5 }
+    $showCommand = 0
+    if ($visible) { $showCommand = 5 }
+    foreach ($className in @('Shell_TrayWnd', 'Shell_SecondaryTrayWnd')) {
+        $taskbar = [TaskbarApi]::FindWindow($className, $null)
+        if ($taskbar -eq [IntPtr]::Zero) { continue }
         [void][TaskbarApi]::ShowWindow($taskbar, $showCommand)
+        [void][TaskbarApi]::ShowWindowAsync($taskbar, $showCommand)
     }
 }
 
@@ -995,6 +998,7 @@ using System.Runtime.InteropServices;
 public static class TaskbarApi {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string cls, string title);
   [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int command);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hwnd, int command);
 }
 '@
 Add-Type @'

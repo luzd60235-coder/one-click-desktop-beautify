@@ -10,6 +10,7 @@
       "Taskbar": true,
       "Apps": {
         "Nexus": true,
+        "TranslucentTB": true,
         "Clash Verge": false
       }
     },
