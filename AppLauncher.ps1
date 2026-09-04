@@ -6,7 +6,10 @@ using System.Threading;
 using System.Runtime.InteropServices;
 public static class OneClickInstance {
   private static Mutex mutex;
+  private delegate bool EnumWindowsProc(IntPtr hwnd, IntPtr lParam);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr FindWindow(string cls, string title);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int max);
   [DllImport("user32.dll")] private static extern bool ShowWindow(IntPtr hwnd, int command);
   [DllImport("user32.dll")] private static extern bool SetForegroundWindow(IntPtr hwnd);
   public static bool Acquire() {
@@ -16,6 +19,14 @@ public static class OneClickInstance {
   }
   public static bool ActivateExisting() {
     IntPtr hwnd = FindWindow(null, "一键桌面美化");
+    if (hwnd == IntPtr.Zero) {
+      EnumWindows((candidate, unused) => {
+        var title = new System.Text.StringBuilder(128);
+        GetWindowText(candidate, title, title.Capacity);
+        if (title.ToString() == "一键桌面美化") { hwnd = candidate; return false; }
+        return true;
+      }, IntPtr.Zero);
+    }
     if (hwnd != IntPtr.Zero) {
       ShowWindow(hwnd, 9);
       SetForegroundWindow(hwnd);
