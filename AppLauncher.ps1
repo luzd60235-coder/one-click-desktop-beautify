@@ -18,19 +18,25 @@ public static class OneClickInstance {
     return created;
   }
   public static bool ActivateExisting() {
-    IntPtr hwnd = FindWindow(null, "一键桌面美化");
-    if (hwnd == IntPtr.Zero) {
-      EnumWindows((candidate, unused) => {
-        var title = new System.Text.StringBuilder(128);
-        GetWindowText(candidate, title, title.Capacity);
-        if (title.ToString() == "一键桌面美化") { hwnd = candidate; return false; }
+    // The first instance may hold the mutex a moment before WPF creates its
+    // top-level window. Retry briefly so a quick second click does not report
+    // a false "no window" error.
+    for (int attempt = 0; attempt < 30; attempt++) {
+      IntPtr hwnd = FindWindow(null, "一键桌面美化");
+      if (hwnd == IntPtr.Zero) {
+        EnumWindows((candidate, unused) => {
+          var title = new System.Text.StringBuilder(128);
+          GetWindowText(candidate, title, title.Capacity);
+          if (title.ToString() == "一键桌面美化") { hwnd = candidate; return false; }
+          return true;
+        }, IntPtr.Zero);
+      }
+      if (hwnd != IntPtr.Zero) {
+        ShowWindow(hwnd, 9);
+        SetForegroundWindow(hwnd);
         return true;
-      }, IntPtr.Zero);
-    }
-    if (hwnd != IntPtr.Zero) {
-      ShowWindow(hwnd, 9);
-      SetForegroundWindow(hwnd);
-      return true;
+      }
+      Thread.Sleep(100);
     }
     return false;
   }
