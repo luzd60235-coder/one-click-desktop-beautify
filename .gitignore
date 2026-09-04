@@ -1,0 +1,6 @@
+*.tmp
+*.log
+obj/
+bin/
+TranslucentTB-portable-x64/
+launcher.log
