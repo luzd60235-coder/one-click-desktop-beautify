@@ -729,8 +729,13 @@ function Stop-ProfileApps([string]$profileId, $state) {
 }
 
 function Exit-BeautyMode {
+    # Remove each profile before stopping it so a process shared by multiple
+    # profiles is stopped when the final owner is processed.
     foreach ($entry in @($script:activeProfiles.GetEnumerator())) {
-        Stop-ProfileApps ([string]$entry.Key) $entry.Value
+        $profileId = [string]$entry.Key
+        $state = $entry.Value
+        [void]$script:activeProfiles.Remove($profileId)
+        Stop-ProfileApps $profileId $state
     }
     $script:activeProfiles.Clear()
     $script:desktopIconsError = $null
@@ -755,7 +760,7 @@ function Invoke-Profile($profile) {
         $launchResult = Start-ProfileApps $profile
         if ($launchResult.Failures.Count -gt 0) {
             foreach ($name in @($launchResult.StartedProcessNames)) {
-                Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -ErrorAction SilentlyContinue
+                Get-Process -Name $name -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
             }
             $failureMessage = "未启用 [$($profile.Name)]：" + ($launchResult.Failures -join '；')
             Set-Validation $failureMessage 'error'
